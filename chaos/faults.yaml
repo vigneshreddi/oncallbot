@@ -1,0 +1,97 @@
+version: 2
+# Generator inputs only. No expected diagnoses or scoring answers are distributed.
+faults:
+  - id: null-legacy
+    service: inventory-service
+    chaos: true
+    weight: 1
+    duration_seconds: 120
+    prepare:
+      - {service: inventory-service, method: POST, path: '/inventory/admin/import-legacy?sku=SKU-CHAOS-LEGACY'}
+    provoke:
+      - service: order-service
+        method: POST
+        path: /orders
+        json: {customerId: chaos-legacy, sku: SKU-CHAOS-LEGACY, qty: 1}
+        expected_status: [500]
+    cleanup:
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-LEGACY/delete}
+  - id: retry-dup-payment
+    service: payment-service
+    chaos: true
+    weight: 1
+    duration_seconds: 120
+    prepare:
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-RETRY/reset}
+      - {service: payment-service, method: POST, path: '/payments/admin/customers/chaos-retry/tier?tier=slow'}
+    provoke:
+      - service: order-service
+        method: POST
+        path: /orders
+        json: {customerId: chaos-retry, sku: SKU-CHAOS-RETRY, qty: 1}
+        expected_status: [500]
+        allow_transport_error: true
+    cleanup:
+      - {service: payment-service, method: POST, path: /payments/admin/customers/chaos-retry/tier/delete}
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-RETRY/delete}
+  - id: status-enum
+    service: payment-service
+    chaos: true
+    weight: 1
+    duration_seconds: 120
+    prepare:
+      - {service: payment-service, method: GET, path: /payments/admin/policy, save: {capture_mode: capture_mode}}
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-STATUS/reset}
+      - {service: payment-service, method: POST, path: '/payments/admin/capture-mode?mode=AUTHORIZED'}
+    provoke:
+      - service: order-service
+        method: POST
+        path: /orders
+        json: {customerId: chaos-status, sku: SKU-CHAOS-STATUS, qty: 1}
+        expected_status: [500]
+    cleanup:
+      - {service: payment-service, method: POST, path: '/payments/admin/capture-mode?mode={{capture_mode}}', requires: capture_mode}
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-STATUS/delete}
+  - id: schema-drift
+    service: inventory-service
+    chaos: true
+    weight: 1
+    duration_seconds: 120
+    prepare:
+      - {service: inventory-service, method: GET, path: /inventory/stock/SKU-1}
+    provoke:
+      - {service: inventory-service, method: GET, path: /inventory/placement/SKU-1, expected_status: [500]}
+    cleanup:
+      - {service: inventory-service, method: GET, path: /inventory/stock/SKU-1}
+  - id: health-down
+    service: inventory-service
+    chaos: true
+    weight: 1
+    duration_seconds: 120
+    prepare:
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-MISSING/reset}
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-MISSING/delete}
+    provoke:
+      - service: order-service
+        method: POST
+        path: /orders
+        json: {customerId: chaos-missing, sku: SKU-CHAOS-MISSING, qty: 1}
+        expected_status: [500]
+    cleanup:
+      - {service: inventory-service, method: POST, path: /inventory/admin/skus/SKU-CHAOS-MISSING/delete}
+  - id: slow-endpoint
+    service: payment-service
+    chaos: true
+    weight: 1
+    duration_seconds: 120
+    prepare:
+      - {service: payment-service, method: POST, path: '/payments/admin/customers/chaos-slow/tier?tier=slow'}
+    provoke:
+      - service: payment-service
+        method: POST
+        path: /payments/charge
+        json: {orderId: '{{charge_order_id}}', customerId: chaos-slow, amount: 19.99}
+        expected_status: [200]
+    cleanup:
+      - {service: payment-service, method: POST, path: /payments/admin/customers/chaos-slow/tier/delete}
+      - {service: payment-service, method: POST, path: '/payments/admin/charges/{{charge_order_id}}/delete'}

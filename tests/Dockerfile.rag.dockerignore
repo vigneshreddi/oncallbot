@@ -1,0 +1,12 @@
+**
+!investigator/
+!investigator/investigator/
+!investigator/investigator/retrieval.py
+!tests/
+!tests/test_rag_postgres.py
+**/.env*
+**/secrets/**
+**/*.key
+**/*.pem
+**/*.token
+**/*credentials*

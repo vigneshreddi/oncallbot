@@ -1,0 +1,31 @@
+# Run manually in the demo (scripts/index-code.ps1). In production this is a CI stage after the image build.
+# Source trees are baked into the indexer image; services.yaml is mounted so prod_commit can change without a rebuild.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: code-indexer, namespace: incident-lab}
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata: {labels: {app: code-indexer, incidentlab/access-postgres: "true"}}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10003, runAsGroup: 10003, seccompProfile: {type: RuntimeDefault}}
+      volumes:
+        - {name: services-config, configMap: {name: services-config}}
+        - {name: tmp, emptyDir: {}}
+      containers:
+        - name: indexer
+          image: docker.io/library/incident-lab-indexer:local
+          imagePullPolicy: Always
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          envFrom: [{secretRef: {name: app-secrets, optional: true}}]
+          env:
+            - {name: DATABASE_URL, value: postgresql://indexer_app@postgres:5432/incidents}
+            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: postgres-secret, key: INDEXER_PASSWORD}}}
+            - {name: SOURCE_ROOT, value: /src}
+            - {name: SERVICES_CONFIG, value: /app/config/services.yaml}
+          volumeMounts:
+            - {name: services-config, mountPath: /app/config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}

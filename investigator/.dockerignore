@@ -1,0 +1,12 @@
+**
+!Dockerfile
+!requirements.txt
+!investigator/
+!investigator/**
+**/.env*
+**/secrets/**
+**/*.key
+**/*.pem
+**/*.token
+**/*credentials*
+**/__pycache__/**

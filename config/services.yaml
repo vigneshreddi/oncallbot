@@ -1,0 +1,28 @@
+# Independent of the services. In real life a build tool (Jenkins) updates prod_commit after a successful deploy.
+# Locally, scripts/use-pushed-commit.ps1 writes git-ignored config/services.deployed.yaml with the real SHA.
+# Each service is its own Maven module with its own organic bugs; repo_path is what search_code/read_file pin to.
+services:
+  - name: order-service
+    repo_url: https://github.com/vigneshreddi/oncallbot
+    repo_path: services/order-service
+    pr_target_branch: main
+    prod_commit: local-demo
+    commit_kind: synthetic
+    db_schema: orders
+    pod_selector: app=order-service
+  - name: inventory-service
+    repo_url: https://github.com/vigneshreddi/oncallbot
+    repo_path: services/inventory-service
+    pr_target_branch: main
+    prod_commit: local-demo
+    commit_kind: synthetic
+    db_schema: inventory
+    pod_selector: app=inventory-service
+  - name: payment-service
+    repo_url: https://github.com/vigneshreddi/oncallbot
+    repo_path: services/payment-service
+    pr_target_branch: main
+    prod_commit: local-demo
+    commit_kind: synthetic
+    db_schema: payments
+    pod_selector: app=payment-service

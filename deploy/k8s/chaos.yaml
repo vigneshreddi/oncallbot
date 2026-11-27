@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: chaos-runner, namespace: incident-lab}
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: chaos-runner}}
+  template:
+    metadata: {labels: {app: chaos-runner}}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 180
+      nodeSelector: {incidentlab/node-group: worker}
+      securityContext: {runAsNonRoot: true, runAsUser: 10004, runAsGroup: 10004, seccompProfile: {type: RuntimeDefault}}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+      containers:
+        - name: chaos
+          image: docker.io/library/incident-lab-chaos:local
+          imagePullPolicy: Always
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          env:
+            - {name: CHAOS_ENABLED, value: "false"}
+            - {name: CHAOS_COOLDOWN_SECONDS, value: "180"}
+            - {name: CHAOS_EVENTS_PATH, value: /tmp/chaos-events.jsonl}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}

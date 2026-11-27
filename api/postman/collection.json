@@ -1,0 +1,757 @@
+{
+  "info": {
+    "name": "Incident Lab Scenario Workflows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Generated from chaos/faults.yaml. Run one scenario folder at a time. Setup failures jump to cleanup; cleanup HTTP failures retry three times. If a run is stopped or the client crashes, execute the remaining cleanup requests manually. Do not run concurrent generators: capture-mode is shared service policy. Business orders and retry payments are retained as incident evidence. health-down probes a missing SKU, not a readiness switch; schema-drift is read-only."
+  },
+  "item": [
+    {
+      "name": "null-legacy",
+      "item": [
+        {
+          "name": "null-legacy / prepare / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/import-legacy?sku=SKU-CHAOS-LEGACY"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"null-legacy / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "null-legacy / provoke / 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{orderUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"chaos-legacy\",\n  \"sku\": \"SKU-CHAOS-LEGACY\",\n  \"qty\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [500].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "null-legacy / cleanup / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-LEGACY/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"null-legacy / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"null-legacy / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"null-legacy / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"null-legacy / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "retry-dup-payment",
+      "item": [
+        {
+          "name": "retry-dup-payment / prepare / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-RETRY/reset"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"retry-dup-payment / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "retry-dup-payment / prepare / 2",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/customers/chaos-retry/tier?tier=slow"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"retry-dup-payment / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "retry-dup-payment / provoke / 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{orderUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"chaos-retry\",\n  \"sku\": \"SKU-CHAOS-RETRY\",\n  \"qty\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [500].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "retry-dup-payment / cleanup / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/customers/chaos-retry/tier/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"retry-dup-payment / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"retry-dup-payment / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"retry-dup-payment / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"retry-dup-payment / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "retry-dup-payment / cleanup / 2",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-RETRY/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"retry-dup-payment / cleanup / 2 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"retry-dup-payment / cleanup / 2 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"retry-dup-payment / cleanup / 2\");",
+                  "} else {",
+                  "  pm.variables.unset(\"retry-dup-payment / cleanup / 2 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "status-enum",
+      "item": [
+        {
+          "name": "status-enum / prepare / 1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/policy"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.unset(\"capture_mode\");",
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"status-enum / cleanup / 1\");",
+                  "if (ok) {",
+                  "  try {",
+                  "    const payload = pm.response.json();",
+                  "    if (typeof payload[\"capture_mode\"] !== 'string') throw new Error('Missing policy value');",
+                  "    pm.collectionVariables.set(\"capture_mode\", encodeURIComponent(payload[\"capture_mode\"]));",
+                  "  } catch (error) {",
+                  "    pm.execution.setNextRequest(\"status-enum / cleanup / 1\");",
+                  "    throw error;",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "status-enum / prepare / 2",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-STATUS/reset"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"status-enum / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "status-enum / prepare / 3",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/capture-mode?mode=AUTHORIZED"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"status-enum / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "status-enum / provoke / 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{orderUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"chaos-status\",\n  \"sku\": \"SKU-CHAOS-STATUS\",\n  \"qty\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [500].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "status-enum / cleanup / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/capture-mode?mode={{capture_mode}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.has(\"capture_mode\")) pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"status-enum / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"status-enum / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"status-enum / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"status-enum / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "status-enum / cleanup / 2",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-STATUS/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"status-enum / cleanup / 2 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"status-enum / cleanup / 2 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"status-enum / cleanup / 2\");",
+                  "} else {",
+                  "  pm.variables.unset(\"status-enum / cleanup / 2 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "schema-drift",
+      "item": [
+        {
+          "name": "schema-drift / prepare / 1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/stock/SKU-1"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"schema-drift / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "schema-drift / provoke / 1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/placement/SKU-1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [500].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "schema-drift / cleanup / 1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/stock/SKU-1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"schema-drift / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"schema-drift / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"schema-drift / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"schema-drift / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "health-down",
+      "item": [
+        {
+          "name": "health-down / prepare / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-MISSING/reset"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"health-down / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "health-down / prepare / 2",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-MISSING/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"health-down / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "health-down / provoke / 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{orderUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"chaos-missing\",\n  \"sku\": \"SKU-CHAOS-MISSING\",\n  \"qty\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [500].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "health-down / cleanup / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/skus/SKU-CHAOS-MISSING/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"health-down / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"health-down / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"health-down / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"health-down / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "slow-endpoint",
+      "item": [
+        {
+          "name": "slow-endpoint / prepare / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/customers/chaos-slow/tier?tier=slow"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"slow-endpoint / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "slow-endpoint / provoke / 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{paymentUrl}}/payments/charge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{charge_order_id}},\n  \"customerId\": \"chaos-slow\",\n  \"amount\": 19.99\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "pm.test(\"Charge latency is at least 3 seconds\", () => pm.expect(pm.response.responseTime).to.be.at.least(3000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "slow-endpoint / cleanup / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/customers/chaos-slow/tier/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"slow-endpoint / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"slow-endpoint / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"slow-endpoint / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"slow-endpoint / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "slow-endpoint / cleanup / 2",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paymentUrl}}/payments/admin/charges/{{charge_order_id}}/delete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"slow-endpoint / cleanup / 2 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"slow-endpoint / cleanup / 2 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"slow-endpoint / cleanup / 2\");",
+                  "} else {",
+                  "  pm.variables.unset(\"slow-endpoint / cleanup / 2 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

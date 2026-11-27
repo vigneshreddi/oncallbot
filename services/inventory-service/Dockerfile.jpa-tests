@@ -1,0 +1,8 @@
+FROM maven:3.9.9-eclipse-temurin-21
+WORKDIR /src
+COPY pom.xml .
+RUN mvn -q -DskipTests dependency:go-offline
+COPY src src
+RUN mvn -q -Dtest=JpaFaultScenariosTest test
+RUN groupadd -g 10001 app && useradd -u 10001 -g app -M app && chown -R app:app /src
+USER 10001

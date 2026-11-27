@@ -1,0 +1,173 @@
+{
+  "info": {
+    "name": "Incident Lab Scenario Workflows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Generated from chaos/faults.yaml. Run one scenario folder at a time. Setup failures jump to cleanup; cleanup HTTP failures retry three times. If a run is stopped or the client crashes, execute the remaining cleanup requests manually. Do not run concurrent generators: capture-mode is shared service policy. Business orders and retry payments are retained as incident evidence. health-down probes a missing SKU, not a readiness switch; schema-drift is read-only."
+  },
+  "item": [
+    {
+      "name": "jpa-lazy",
+      "item": [
+        {
+          "name": "jpa-lazy / prepare / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/jpa/prepare"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"jpa-lazy / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "jpa-lazy / provoke / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/jpa/lazy/provoke"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [500].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "jpa-lazy / cleanup / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/jpa/cleanup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"jpa-lazy / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"jpa-lazy / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"jpa-lazy / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"jpa-lazy / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "jpa-optimistic-lock",
+      "item": [
+        {
+          "name": "jpa-optimistic-lock / prepare / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/jpa/prepare"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"charge_order_id\", -(Date.now() * 1000 + Math.floor(Math.random() * 1000)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "if (!ok) pm.execution.setNextRequest(\"jpa-optimistic-lock / cleanup / 1\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "jpa-optimistic-lock / provoke / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/jpa/optimistic-lock/provoke"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [500].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "jpa-optimistic-lock / cleanup / 1",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{inventoryUrl}}/inventory/admin/jpa/cleanup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = !!pm.response && [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299].includes(pm.response.code);",
+                  "pm.test(\"Expected HTTP status\", () => pm.expect(ok).to.be.true);",
+                  "const retries = Number(pm.variables.get(\"jpa-optimistic-lock / cleanup / 1 retries\") || 0);",
+                  "if (!ok && retries < 2) {",
+                  "  pm.variables.set(\"jpa-optimistic-lock / cleanup / 1 retries\", retries + 1);",
+                  "  pm.execution.setNextRequest(\"jpa-optimistic-lock / cleanup / 1\");",
+                  "} else {",
+                  "  pm.variables.unset(\"jpa-optimistic-lock / cleanup / 1 retries\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

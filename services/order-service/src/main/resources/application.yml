@@ -1,0 +1,29 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:postgres}:5432/incidents?currentSchema=orders
+    username: ${DB_USER:order_svc}
+    password: ${DB_PASSWORD:}
+  http:
+    client:
+      connect-timeout: 1s
+      read-timeout: 1500ms
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+logging:
+  structured:
+    format:
+      console: ecs
+app:
+  peers:
+    inventory: ${INVENTORY_URL:http://inventory-service:8080}
+    payment: ${PAYMENT_URL:http://payment-service:8080}
