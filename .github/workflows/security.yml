@@ -38,7 +38,7 @@ jobs:
       - name: Scan current files for secrets
         if: always()
         run: gitleaks dir . --redact --exit-code 1 --report-format json --report-path gitleaks-files.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: secrets-reports
@@ -64,7 +64,7 @@ jobs:
         run: python -m pip install pip-audit==2.9.0
       - name: Audit resolved transitive dependencies
         run: pip-audit -r '${{ matrix.component }}/requirements.txt' --strict --progress-spinner off --format json --output pip-audit.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: pip-audit-${{ matrix.component }}
@@ -98,7 +98,7 @@ jobs:
           org.owasp:dependency-check-maven:12.1.0:check
           -DfailBuildOnCVSS=7 -DfailOnError=true -Dformats=HTML,JSON
           -DoutputDirectory=${{ github.workspace }}/dependency-check
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: dependency-check-${{ matrix.component }}
@@ -163,7 +163,7 @@ jobs:
         run: trivy image --image-src docker --format cyclonedx --output sbom.cdx.json 'security/${{ matrix.name }}:ci'
       - name: Fail on HIGH or CRITICAL, including unfixed CVEs
         run: trivy image --image-src docker --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output trivy.json 'security/${{ matrix.name }}:ci'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: image-security-${{ matrix.name }}
