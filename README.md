@@ -1,256 +1,268 @@
 # OnCallBot
 
-[Interactive architecture and incident-flow explorer](docs/architecture.html) - standalone HTML with component details, source references, and build-time RAG flow. Open locally in a browser; no server or external dependencies required.
+**Evidence-driven incident investigation for Kubernetes—from production signals to verified root-cause reports and human-reviewed draft pull requests.**
 
-## Acceptance Update (2026-10-03)
+OnCallBot is a standalone, least-privilege Kubernetes service that investigates failures across any microservices registered in `config/services.yaml`. It pairs **deterministic health triage**, **commit-pinned AST code RAG**, **direct native LLM tool-calling** (OpenAI, Anthropic, or private local Ollama), and **strict database/cluster guardrails**—so an AI model can drive multi-step root-cause analysis without ever receiving unguarded write access to your cluster, business databases, or GitHub.
 
-- Network probes across both nodes passed same-namespace connectivity, outside-namespace denial, outbound HTTPS, and loopback-only forwarding. Run `scripts/probe-network.ps1` to collect fresh evidence. Genuine external-host denial and policy-engine identification remain unresolved; the strict isolation gate is not bypassed. See [docs/network-isolation.md](docs/network-isolation.md).
-- Isolated infrastructure workflows support pod deletion, bounded OOM, service scale-to-zero, and explicitly simulated node unavailability. Live OOM produced `OOMKilled` and restored zero replicas. Actual node failure/drain requires an operator; the runner never modifies nodes. See [docs/infra-chaos.md](docs/infra-chaos.md).
-- Real JPA lazy-loading and optimistic-lock failures passed against PostgreSQL. Demo activation was removed afterward; endpoints are disabled by default. Separate Postman exports are `api/postman/inventory-jpa.collection.json` and `api/postman/inventory-jpa.environment.json`. See [services/inventory-service/JPA-FAULTS.md](services/inventory-service/JPA-FAULTS.md).
-- Integrated Python suite: 180 passed, 2 skipped, 81 subtests passed. Five Hibernate/JPA tests also passed. Skips require a disposable RAG test database.
-- `scripts/live-acceptance.py` defaults to configuration checks without network calls. Locally supplied credentials and explicit provider enablement are required for billed/live probes; no secrets should be shared through chat. No credentials are currently configured, so live-provider acceptance and measured token savings remain blocked.
+> **Interactive Explorer:** Open [docs/architecture.html](docs/architecture.html) locally in any browser for an interactive component map, source references, and build-time RAG walkthrough (no server required).
 
-Evidence-driven incident investigation, from production signals to reviewable fixes.
+---
 
-Kubernetes-native incident investigator for three independent Spring Boot microservices (order → inventory → payment, backed by three PostgreSQL schemas). Real fault scenarios exercise business paths; an in-cluster investigator collects pod logs, takes a deterministic snapshot, classifies incidents, optionally uses an LLM with bounded tools, and writes an evidence-linked report.
+## System Architecture
 
-## Credentials — read this first
+OnCallBot separates **build-time code indexing** from **runtime investigation**, keeping business data, investigation audit records, and the vector code index isolated across **7 non-superuser PostgreSQL roles**.
 
-**Nothing in this repository contains credentials, and nothing you add may either.**
+```mermaid
+flowchart LR
+  subgraph Services["Your Registered Services (e.g. Order -> Inventory -> Payment)"]
+    REG["config/services.yaml<br/>(repo, prod_commit, schema, pods)"]
+    APP["Microservices<br/>(independent schemas & roles)"]
+  end
 
-1. Copy `.env.example` to `.env` and fill in what you need. `.env` is git-ignored.
-2. `scripts/up.ps1` loads `.env` into a Kubernetes Secret (`app-secrets`) and generates the PostgreSQL password into another Secret. Values are never printed.
-3. Without a `.env`, the stack still runs with the LLM disabled; reports contain the deterministic snapshot and rule-based classification only.
+  subgraph Signals["Failure Signals"]
+    K8SLogs["Kubernetes Pod Logs<br/>(default in-cluster collector)"]
+    Vendor["Datadog / Loki / Splunk<br/>(log queries & validated webhooks)"]
+  end
 
-Database passwords are generated or reused in `postgres-secret` by deployment, never supplied in `.env`.
-Bootstrap creates schemas and the indexer's `code_index.rag_*` tables under their dedicated owners,
-then grants the investigator read access to current and future index tables. Application initializers
-create only their own tables in existing schemas. Business SQL tools require the Secret's `RO_PASSWORD`
-for `investigator_ro`; without it they fail closed, never falling back to the application DSN.
-Existing PostgreSQL storage and credential values are preserved on subsequent deployments.
+  subgraph CI["Build-Time RAG Indexer (CI)"]
+    IDX["Code Indexer K8s Job<br/>tree-sitter AST + full UTF-8 source<br/>SHA-256 embedding cache<br/>atomic publish (docs RAG designed)"]
+  end
 
-| Key | Purpose | Required |
-|---|---|---|
-| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` | LLM for the investigation loop (`anthropic`, `openai`, `ollama`, or `none`) | optional |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` | Embeddings for the build-time code index | optional |
-| `GITHUB_TOKEN` | Read-only token so `read_file` can fetch code at `prod_commit` from your fork | optional |
-| `DATADOG_API_KEY` / `DATADOG_APP_KEY` | Datadog keys with log read permission, required for `LOG_PROVIDER=datadog` | provider-specific |
-| `LOKI_USERNAME` / `LOKI_PASSWORD` or `LOKI_TOKEN` | Loki read-only basic authentication or bearer token; both modes cannot be combined | provider-specific |
-| `SPLUNK_TOKEN` | Bearer token with read-only search access to `SPLUNK_INDEX` | required for Splunk |
+  subgraph Inv["OnCallBot Investigator (Private ClusterIP Pod • Read-Only K8s RBAC)"]
+    S1["1. Health & Triage (No LLM)<br/>pods, restarts, endpoints, DB health<br/>infra / dependency / data / code / unknown"]
+    S2["2. AI-Driven Loop (Native Tools)<br/>category-gated tools, step/call caps<br/>validate-only propose_patch<br/>rule-based fallback if API offline"]
+    S3["3. Report, Audit & Fix Gate<br/>Markdown RCA, NDJSON audit,<br/>IDE handoff brief, target-branch<br/>re-check & draft PR engine"]
+    S1 --> S2 --> S3
+  end
 
-Rules for contributors are in `.github/copilot-instructions.md`; the deployment gate (`scripts/security-check.ps1`) fails if `.env` is ever tracked.
+  subgraph PG["PostgreSQL + pgvector (7 Isolated Non-Superuser Roles)"]
+    DBCode["code_index.*<br/>rag_indexes, rag_sources,<br/>rag_chunks, rag_vectors"]
+    DBInv["investigator.*<br/>incidents, occurrences, evidence,<br/>llm_exchanges, fix_proposals"]
+    DBBiz["Business Schemas<br/>(e.g. orders, inventory, payments)<br/>investigator_ro SELECT-only (3s, 50 rows)"]
+  end
 
-## Security model
+  subgraph External["Encrypted Outbound Only"]
+    LLM["Pluggable AI Model<br/>OpenAI / Anthropic / Local Ollama"]
+    GH["GitHub Git Data / PR API<br/>separate GITHUB_WRITE_TOKEN<br/>AI-labelled draft PR on incident-fix/*"]
+    Human["Developer & Reviewer<br/>verifies evidence, approves & merges"]
+  end
 
-- Intended configuration: `ClusterIP` Services only, no Ingress, external IPs, host networking, host ports, host mounts or privileged containers. Workloads must use fixed non-root UIDs, `RuntimeDefault` seccomp, no privilege escalation, all capabilities dropped and read-only root filesystems. The runtime gate checks deployed pods, including init and ephemeral containers, not just manifests.
-- NetworkPolicies express ingress restrictions; their existence does **not** prove isolation. The current Docker Desktop cluster was observed using `kindnet`, without a recognized NetworkPolicy enforcement engine. Treat external ingress as **unverified**, and the deployment security gate as failed, until actual enforcement is demonstrated. Kubernetes policy implementations can also exempt node/host traffic, so namespace-only probes are insufficient.
-- Outbound internet remains allowed for LLM APIs, GitHub and registries. Keep manual port-forwards bound to localhost (kubectl's default, or explicit `--address 127.0.0.1`); never use `--address 0.0.0.0`. Local forwards bypass normal Service exposure and are not proof of policy enforcement. Fault endpoints are not authenticated and must not be exposed publicly.
-- Run `./scripts/security-check.ps1 -Static`, `./tests/security/test-security.ps1` and `./tests/security/test-ci.ps1` for repository/fixture checks, then `./scripts/security-check.ps1` for read-only live inspection. Failure or unavailable evidence is not approval. No privileged probes, host mounts or node filesystem access are used.
-- To evaluate a policy-capable CNI, supply independently collected JSON with `-EnforcementEvidence <local-file>`. Evidence must be less than one hour old, match the gate's `context`, `namespace`, `policySha256`, sorted `nodeUids` and sorted `targetPodUids`, and include `observedAt`, inspected `cni` configuration and detailed `probeDetails` (source, destination, ports, commands, positive controls and observed results). Boolean results `outsideNamespaceDenied`, `externalHostDenied`, `sameNamespaceAllowed`, `outboundInternetAllowed` and `localhostPortForwardAllowed` must all be true. Test every target pod/node and exposed port from an unauthorized namespace and an external host, including direct node/pod paths; a timeout without a reachable positive control is inconclusive. This is operator-supplied evidence, not an automatic certification. Keep evidence and reports outside the repository; never include credentials.
-- [Security CI](.github/workflows/security.yml) uses SHA-pinned actions, read-only repository permissions and version-pinned, checksum-verified gitleaks/Trivy/Maven tools. It scans current files and full Git history with redacted gitleaks reports, resolves Python transitive dependencies using pip-audit, and runs Maven Dependency-Check (CVSS >= 7 fails). Every runtime image, including the pinned PostgreSQL image, gets a CycloneDX SBOM and Trivy scan; HIGH/CRITICAL findings, including unfixed CVEs, fail. Reports, SBOMs and image identities are retained for 14 days even when a scan fails. Feed/download/build errors also fail; there are no suppressions or automatic waivers.
-- Configure branch protection to require `Security / security-gate`; adding the workflow alone does not prevent merges. CI has no cluster credentials and cannot certify live CNI enforcement. Dependabot proposes dependency, image and action updates, but scanner CLI pins require reviewed updates. Publisher checksums detect corrupted downloads, not a compromised publisher. This lab is **not fully secured**, and green static checks do not resolve live exposure, CVEs, authorization gaps or other untested risks.
+  REG -. "read-only config" .-> Inv
+  APP -. "read-only pod health" .-> S1
+  K8SLogs --> S1
+  Vendor --> S1
+  IDX -->|"atomic TX"| DBCode
+  S2 <-->|"RAG search"| DBCode
+  Inv <-->|"state & audit"| DBInv
+  S2 -->|"read-only SELECT"| DBBiz
+  S2 <-->|"native tool calls"| LLM
+  S3 -->|"guarded draft PR"| GH
+  GH --> Human
+  S3 -. "report & handoff" .-> Human
+```
 
-## Prerequisites
+---
 
-Docker Desktop with a **2-node Kubernetes cluster** named `desktop-control-plane` and `desktop-worker`, `kubectl`, and Windows PowerShell. `scripts/up.ps1` labels these nodes for workload placement.
+## Core Engineering Guardrails
 
-## Deploy and index
+- **Deterministic triage before calling AI:** Captures pod health, container restarts, ready endpoints, recent K8s events, and PostgreSQL activity—recording any check gap explicitly—and classifies each incident into `infra`, `dependency`, `data`, `code`, or `unknown`. `infra` and `dependency` incidents are capped at **3 LLM steps** and do not read application code.
+- **Commit-pinned AST RAG (with planned docs repo support):** Parses Java source by class, method, constructor, and field (`tree-sitter`) at build time, storing full UTF-8 files alongside chunks so every citation points to an exact `file:line` range at `prod_commit`. Publishes atomically in one PostgreSQL transaction; uses `pgvector` cosine search when embeddings are enabled and falls back cleanly to weighted keyword search. See [docs/rag.md](docs/rag.md) for the planned versioned documentation/runbook RAG contract.
+- **Direct native tool-calling (no opaque agent framework):** Implements a bounded tool-calling loop directly against OpenAI-compatible (OpenAI, local Ollama) and Anthropic APIs with hard step, tool-call, and timeout budgets. If the model API is offline or disabled (`LLM_PROVIDER=none`), a deterministic fallback still saves the health snapshot, trace logs, and baseline summary.
+- **Defense-in-depth data & cluster boundaries:** Business SQL tools connect exclusively through `investigator_ro` (fail-closed if `RO_PASSWORD` is missing), enforcing a single `SELECT` statement, `3s` timeout, and `50`-row cap, with every result stamped as **current observed state**. Workloads run as non-root `ClusterIP` pods with read-only root filesystems, dropped capabilities, and read-only namespace RBAC.
+- **Human-in-the-loop remediation:** The LLM has zero GitHub write access—it can only call validate-only `propose_patch` (exact single-match edit at `prod_commit`, path inside service, size/edit caps, secret-pattern check). When draft PRs are opted in (`FIX_PR_ENABLED=true`), the investigator re-verifies edits against `pr_target_branch` (refusing with `409` on drift) using a separate `GITHUB_WRITE_TOKEN` and opens one AI-labelled draft PR per service. Nothing auto-merges or deploys. See [docs/draft-fixes.md](docs/draft-fixes.md).
+
+---
+
+## Quick Start (Local Kubernetes)
+
+The repository includes an example three-service Spring Boot e-commerce stack (`order-service` → `inventory-service` → `payment-service`) plus a private ground-truth fault catalog (`chaos/faults.yaml`) so you can run realistic multi-service failures end to end locally.
+
+### Prerequisites
+
+- Docker Desktop with a **2-node Kubernetes cluster** named `desktop-control-plane` and `desktop-worker`
+- `kubectl`, Windows PowerShell, and Python 3.12
+
+### 1. Select cluster & optionally configure `.env`
 
 ```powershell
 kubectl config use-context docker-desktop
-.\scripts\up.ps1            # postgres and 3 services; unproven CNI isolation is a warning (-StrictIsolation makes it fatal)
-.\scripts\index-code.ps1    # build and run the code-indexer Job
-.\scripts\start-investigator.ps1 # refuses to start without ready indexes
 ```
 
-The first script builds separate service images and bootstraps schema-scoped database roles without resetting existing data. New investigator deployment follows manual indexing. The reference Jenkinsfile runs the same indexing stage in CI. Embeddings are optional; lexical retrieval works without a provider. See [docs/rag.md](docs/rag.md) for atomic indexing, source provenance, semantic retrieval, and comparison commands.
+Copy `.env.example` to git-ignored `.env` if you want to connect an LLM (`openai`, `anthropic`, or local `ollama`), embeddings, a log vendor, or GitHub draft PRs. Leave `.env` absent to run in rule-based mode only. **Never put database passwords in `.env`**—`up.ps1` generates and stores them in Kubernetes Secret `postgres-secret`.
 
-Optional: `.\scripts\start-chaos.ps1` deploys the chaos runner. It selects eligible entries in `chaos/faults.yaml`, enables a service fault, provokes an order request, disables the fault after its configured duration, and records the run in `investigator.chaos_events`.
+### 2. Deploy PostgreSQL, 7 DB roles & example microservices
 
-Separate, default-disabled infrastructure scenarios are available through
-[`scripts/start-infra-chaos.ps1`](scripts/start-infra-chaos.ps1): allowlisted demo-service
-scale-zero, isolated pod deletion, memory-limit OOM and **simulated** node unavailability.
-See [docs/infra-chaos.md](docs/infra-chaos.md) for scoped RBAC, installation, evidence,
-restoration and safety limits. Actual node drain/failure is unsupported and requires
-an operator; there is no infrastructure HTTP/Postman mutation endpoint.
+```powershell
+.\scripts\up.ps1
+```
 
-## Cause a real incident
+Validates manifests, loads `.env` into `app-secrets`, generates DB credentials, labels the 2 nodes, deploys PostgreSQL + `pgvector`, provisions all **7 non-superuser schema-scoped roles**, builds and deploys the 3 example Spring Boot services, and runs security checks. It intentionally holds back the investigator until code indexes are ready. *(Pass `-StrictIsolation` to fail on unverified CNI enforcement.)*
+
+### 3. Build & run the commit-scoped code indexer
+
+```powershell
+pip install -r indexer/requirements.txt
+.\scripts\index-code.ps1
+```
+
+Generates a verified source-hash manifest on the host, bakes it into the indexer image (no host mounts), runs the `code-indexer` Job, parses AST chunks + full source, computes optional embeddings, and atomically publishes ready indexes into `code_index.*`.
+
+### 4. Start the Investigator
+
+```powershell
+.\scripts\start-investigator.ps1
+```
+
+Verifies PostgreSQL RAG tables exist and every registered service commit has a ready index—refusing to start otherwise—then deploys `deployment/investigator` and checks `index_status()` from inside the running pod.
+
+### 5. Open localhost-only port-forwards
+
+Keep these running in separate windows (always bound to localhost; never `--address 0.0.0.0`):
 
 ```powershell
 Start-Process kubectl -ArgumentList 'port-forward -n incident-lab svc/order-service 18080:8080'
 Start-Process kubectl -ArgumentList 'port-forward -n incident-lab svc/inventory-service 18081:8080'
 Start-Process kubectl -ArgumentList 'port-forward -n incident-lab svc/payment-service 18082:8080'
 Start-Process kubectl -ArgumentList 'port-forward -n incident-lab svc/investigator 18090:8080'
-.\scripts\trigger.ps1 -Fault null-legacy      # enables a fault and sends a real POST /orders request
+curl.exe http://localhost:18090/health
+```
+
+### 6. Trigger a real fault scenario
+
+```powershell
+pip install -r chaos/requirements.txt
+.\scripts\trigger.ps1 -Fault null-legacy
+```
+
+Enables the fault, sends a real `POST /orders` request across the services, and cleans up after the configured window. Other built-in faults in [chaos/faults.yaml](chaos/faults.yaml): `retry-dup-payment`, `status-enum`, `schema-drift`, `health-down`, and `slow-endpoint`.
+
+- **Opt-in JPA faults:** `jpa-lazy` and `jpa-optimistic-lock` (default-disabled; see [services/inventory-service/JPA-FAULTS.md](services/inventory-service/JPA-FAULTS.md)).
+- **Opt-in infra chaos:** scale-zero, pod deletion, bounded OOM, and simulated node unavailability via `.\scripts\start-infra-chaos.ps1` (see [docs/infra-chaos.md](docs/infra-chaos.md)).
+
+### 7. Inspect the report, audit trail & IDE handoff
+
+```powershell
 curl.exe http://localhost:18090/incidents
 curl.exe http://localhost:18090/incidents/<id>/report
+curl.exe http://localhost:18090/incidents/<id>/audit
+.\scripts\incident-handoff.ps1 -IncidentId <id>
 ```
 
-The trigger script uses the existing service forwards above (order `18080`, inventory `18081`, payment `18082`, matching the Postman environment); keep them running. Install `chaos/requirements.txt` first. Available faults are `null-legacy`, `retry-dup-payment`, `status-enum`, `schema-drift`, `health-down`, and `slow-endpoint` — see [`chaos/faults.yaml`](chaos/faults.yaml). The Postman collection in [`api/postman/`](api/postman/) drives service admin endpoints; use `scripts/postman-port-forward.ps1` to expose a service locally.
+`incident-handoff.ps1` saves `logs/incident-<id>-handoff.md` and copies the evidence brief to your clipboard for Copilot/IDE continuation. For read-only database browsing in DBeaver, run `.\scripts\dbeaver-connect.ps1`.
 
-The investigator also exposes `GET /health`, `GET /logs`, and `POST /webhooks/incident`. The generic webhook remains available alongside explicit vendor endpoints described below. Reports combine the collected snapshot with rule-based classification and, when configured, bounded LLM tool calls. Database rows returned to the investigator represent current observed state, not a reconstruction of state at incident time.
+### 8. Optional — Enable Real GitHub Draft Pull Requests
 
-Inventory's separate JPA demos require both `SPRING_PROFILES_ACTIVE=demo` and
-`INVENTORY_DEMO_FAULTS_ENABLED=true`; the manifest explicitly defaults to disabled.
-See [services/inventory-service/JPA-FAULTS.md](services/inventory-service/JPA-FAULTS.md)
-for bounded prepare/provoke/cleanup, PostgreSQL acceptance and restoration details.
-Use `scripts/trigger.ps1 -Catalog chaos/inventory-faults.yaml -Fault jpa-lazy -DurationSeconds 0`
-(or `jpa-optimistic-lock`) after explicit activation.
-The separate [api/postman/inventory-jpa.collection.json](api/postman/inventory-jpa.collection.json)
-and [api/postman/inventory-jpa.environment.json](api/postman/inventory-jpa.environment.json)
-leave the existing Postman exports untouched.
+The default registry uses synthetic `prod_commit: local-demo`, which the PR engine intentionally refuses. To open real AI-labelled draft PRs against `main`:
 
-## Vendor logs and alerts
+1. Commit and push all changes cleanly so `HEAD` matches `origin/main`.
+2. Run `.\scripts\use-pushed-commit.ps1` to write the real 40-character SHA into git-ignored `config/services.deployed.yaml` (`-Revert` returns to `local-demo`).
+3. In `.env`, set `FIX_PR_ENABLED=true`, `FIX_PR_MODE=auto` (or `approve`), a separate fine-grained `GITHUB_WRITE_TOKEN` (scoped to `vigneshreddi/oncallbot` with Contents + Pull requests read/write), and an HTTPS `FIX_EVIDENCE_BASE_URL`.
+4. Re-run `.\scripts\up.ps1`, `.\scripts\index-code.ps1`, and `.\scripts\start-investigator.ps1`.
 
-Set `LOG_PROVIDER=kubernetes|datadog|loki|splunk` in `.env`; Kubernetes is the default.
-Datadog uses `DATADOG_SITE` (an allowlisted Datadog domain) and `/api/v2/logs/events/search`.
-Loki uses `LOKI_BASE_URL`, optional `LOKI_TENANT_ID`, and `/loki/api/v1/query_range`;
-streams must have a `service` label matching the configured service registry.
-Splunk uses `SPLUNK_BASE_URL` (HTTPS management endpoint), `SPLUNK_INDEX`, and a single
-synchronous `/services/search/jobs/export` request. Splunk events must expose a `service` field.
-There are no job-creation calls, polling loops, or vendor pagination.
+---
 
-Incidents are grouped per issue, not per alert. The fingerprint is service + error type +
-message with numbers and ids removed, so the same error from collected logs, Datadog, Loki or
-Splunk joins one incident row; alerts without error details are grouped by alerting rule
-(Datadog monitor, Loki `alertname`, Splunk saved search). Each occurrence is stored in
-`investigator.incident_occurrences` with source, alert/event id, pod, `trace_id`, `span_id`,
-`correlation_id` and `request_id` (from log fields, `key:value` tags or the optional Datadog
-`span_id`/`correlation_id`/`request_id`/`error_type` payload fields). Re-delivered alerts
-(same source and id) are ignored. `GET /incidents/{id}/occurrences` lists them.
+## Configuration & Credentials
 
-`GET /logs` and the log tools accept `service`, literal `text`, `limit`, and `time_window`
-(lookback seconds ending now). Default lookback is `LOG_QUERY_WINDOW_SECONDS=900`, maximum
-86400 seconds; sources cap results at 200 and `search_logs` at 100. API out-of-range values
-are rejected; direct source/tool inputs are clamped. HTTP timeout is
-`LOG_HTTP_TIMEOUT_SECONDS` (1..60 seconds), with a 2 MiB response cap and a streaming deadline
-checked between chunks. Provider errors are sanitized. TLS certificate verification is always
-enabled, redirects and environment proxies are disabled, and neither models nor webhooks can
-choose query endpoints. Private certificate authorities must be trusted by the runtime OS;
-there is no insecure TLS switch.
+**Nothing in this repository contains credentials, and nothing you add may either.** The static gate (`.\scripts\security-check.ps1 -Static`) fails if `.env` is ever tracked.
 
-Vendor query results retain `service`, `pod`, `event_at`, `observed_at`, `level`, `trace_id`,
-`message`, and `raw`. Vendor selection stops the Kubernetes log collector only; the existing
-investigation flow still uses Kubernetes/database triage and local incident storage.
-Historical webhook event times are recorded as evidence, not used to move the agent's
-current-time log query window. No agent/store changes are included here.
+| Key | Purpose | Required |
+|---|---|---|
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` | LLM for the investigation loop (`openai`, `anthropic`, `ollama`, or `none`) | optional |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` | Embeddings for build-time vector code RAG (`openai`, `ollama`, or `none`) | optional |
+| `GITHUB_TOKEN` | Read-only token for fetching a file at `prod_commit` if absent from the index | optional |
+| `FIX_PR_ENABLED` / `FIX_PR_MODE` | Opt-in draft PR creation (`true` to enable; mode `auto` or `approve`) | optional |
+| `GITHUB_WRITE_TOKEN` / `FIX_EVIDENCE_BASE_URL` | Separate fine-grained repo write token and HTTPS evidence link base URL | required for draft PRs |
+| `LOG_PROVIDER` | Active log backend: `kubernetes` (default), `datadog`, `loki`, or `splunk` | optional |
+| `DATADOG_SITE` / `DATADOG_API_KEY` / `DATADOG_APP_KEY` | Allowlisted Datadog domain and read-only log keys | for `datadog` |
+| `LOKI_BASE_URL` / `LOKI_USERNAME` & `LOKI_PASSWORD` or `LOKI_TOKEN` | Loki HTTPS endpoint and basic auth **or** bearer token (not both) | for `loki` |
+| `SPLUNK_BASE_URL` / `SPLUNK_TOKEN` / `SPLUNK_INDEX` | Splunk HTTPS management endpoint and read-only search token | for `splunk` |
 
-Explicit POST endpoints validate payloads against configured services before persistence:
+---
 
-- `/webhooks/datadog`: configure a custom monitor webhook with `alert_id` or `monitor_id`,
-	`monitor_name`, `alert_title` or `title`, `date` (Unix seconds/milliseconds or ISO-8601),
-	optional event `id`, `trace_id`, and `tags` (comma-separated string or list).
-	Exactly one `service:<name>` tag or explicit `service` is required; conflicting services
-	are rejected. Optional `alert_status`, `alert_transition`, `event_type`, and `text` are retained.
-- `/webhooks/loki`: Alertmanager-style `alerts` array (maximum 20), each with
-	`labels.service`, `startsAt`, `fingerprint`, optional `labels.trace_id`, and annotations.
-	Firing and resolved events are accepted and labeled as such in evidence. Standard envelope
-	metadata is accepted; `generatorURL` and `externalURL` are never fetched.
-- `/webhooks/splunk`: `search_name`, `sid`, and `result` containing `service`, `_time`,
-	optional `message`, `_raw`, and `trace_id`. `results_link` is never fetched.
+## Investigator API
 
-Unknown payload fields are rejected. Deduplication includes provider, service, event identity,
-and event time. Webhooks do not authenticate vendor senders; keep them behind the existing
-private network boundary or an authenticated operator-managed relay. Manifests and deployment
-scripts are unchanged; ensure the investigator receives the selected environment settings.
+All 15 routes run on the private `ClusterIP` service (`http://localhost:18090` when port-forwarded).
 
-Mock-only tests (no provider credentials or live requests):
+### Read Investigation & Evidence
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Service status, registered services, active LLM/log provider, and code-index readiness per commit |
+| `GET /incidents` | Lists incidents (newest first) with service, category, status, timestamps, occurrence count, usage, and failure |
+| `GET /incidents/{id}/report` | Full Markdown root-cause report (deterministic snapshot, findings, draft PR links, evidence trail, usage) |
+| `GET /incidents/{id}/occurrences` | Every repeat occurrence with source, alert ID, pod, `trace_id`, `span_id`, `correlation_id`, and `request_id` |
+| `GET /incidents/{id}/handoff` | Self-contained Markdown brief from saved evidence for continuing in an IDE assistant |
+| `GET /incidents/{id}/audit` | Chronological NDJSON audit log of every prompt, tool call/result, retrieved code chunk, and fix proposal |
+| `GET /logs` | Queries the active log provider (`kubernetes`, `datadog`, `loki`, or `splunk`) by service, text, limit (max 200), and time window |
+| `GET /incidents/{id}/fix` | Stored AI fix proposals, edits, status (`proposed`, `pr_opened`, `pr_failed`), and draft PR URLs |
+
+### Ingest Alerts & Manage Draft Fixes
+
+| Endpoint | Description |
+|---|---|
+| `POST /webhooks/incident` | Generic alert trigger for any registered service; opens/joins an incident and queues investigation |
+| `POST /webhooks/datadog` | Validates Datadog monitor webhook (strict schema + single service tag), deduplicates, and investigates |
+| `POST /webhooks/loki` | Accepts up to 20 Alertmanager-style alerts, deduplicates by event identity, and investigates each |
+| `POST /webhooks/splunk` | Validates Splunk saved-search webhook matching a registered service, deduplicates, and investigates |
+| `POST /incidents/{id}/propose-fix` | Human-submitted fix path after analysis (requires `reviewer_confirmed: true`, deployed SHA, and expected blob SHAs) |
+| `POST /incidents/{id}/open-pr` | Approves stored AI proposals (in `approve` mode or retries) to re-verify against target branch and open draft PRs |
+| `POST /incidents/{id}/reinvestigate` | Clears previous evidence, LLM exchanges, and unopened proposals, then re-queues investigation (`202 Accepted`) |
+
+All webhook and fix endpoints reject unknown JSON fields, validate services against `config/services.yaml`, and never fetch untrusted callback URLs (`generatorURL`, `externalURL`, `results_link`). Outbound HTTP always enforces TLS verification with redirects and environment proxies disabled.
+
+---
+
+## Security Model & Supply Chain
+
+- **Kubernetes workload hardening:** `ClusterIP` Services only—no Ingress, external IPs, host networking, host ports, host mounts, or privileged containers. Pods run with fixed non-root UIDs, `RuntimeDefault` seccomp, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, and read-only root filesystems. The runtime gate checks live pods (including init/ephemeral containers).
+- **Database role isolation:** Seven non-superuser PostgreSQL roles separate service writes (`orders`, `inventory`, `payments`), indexing (`indexer_app`), investigation state (`investigator_app`), read-only business queries (`investigator_ro`), chaos (`chaos_app`), and DBeaver browsing (`db_viewer`).
+- **NetworkPolicy caveat:** Local Docker Desktop Kubernetes runs `kindnet`, which does not enforce `NetworkPolicy` manifests. Production clusters (e.g. EKS with Calico or Cilium) must supply fresh, independently collected isolation probes via `./scripts/security-check.ps1 -EnforcementEvidence <file>` (see [docs/network-isolation.md](docs/network-isolation.md)).
+- **CI security workflow:** [.github/workflows/security.yml](.github/workflows/security.yml) uses SHA-pinned Actions, read-only permissions, and checksum-verified tools to run `gitleaks` (current files + full Git history), `pip-audit`, Maven Dependency-Check (`CVSS >= 7` fails), CycloneDX SBOM generation, and Trivy image scans (`HIGH`/`CRITICAL` fail). Configure branch protection on `main` to require `Security / security-gate`.
+
+---
+
+## Testing & Provider Acceptance
 
 ```powershell
+# Static repository & manifest security checks
+.\scripts\security-check.ps1 -Static
+.\tests\security\test-security.ps1
+.\tests\security\test-ci.ps1
+
+# Unit & regression tests (offline, no provider credentials required)
+python -m pytest -q
 python -m unittest discover -s investigator/tests -p 'test_vendor*.py' -v
-```
+python -m unittest discover -s investigator/tests -p 'test_fixes.py' -v
+python -m unittest discover -s tests -p 'test_rag.py' -v
+python -m tests.rag_compare
 
-## Provider acceptance
-
-[scripts/live-acceptance.py](scripts/live-acceptance.py) defaults to offline configuration
-checks. It loads the root `.env` locally if present; process environment values take
-precedence, including empty values. The loader supports literal `KEY=value`, quoted
-values and `export`, but does not expand variables or execute shell expressions.
-There is no requirement to create `.env`. Credential values are never printed.
-Git HTTPS authentication, credential helpers and `GH_TOKEN` do not establish that
-the application's `GITHUB_TOKEN` is configured.
-
-```powershell
+# Offline provider config check (no network calls)
 python scripts/live-acceptance.py --check-only
-python -m pytest tests/test_live_acceptance.py -q
 ```
 
-The CLI prints JSON and writes the same safe report to the git-ignored
-[tmp/](tmp/) directory, defaulting to `tmp/live-acceptance.json`. `--report` may select
-another JSON path only inside that directory. Reports contain configuration presence,
-fixed status/error codes, numeric HTTP status and validated usage, never credentials,
-endpoints, model names, user/repository identities, provider bodies or exception text.
-`configured` means locally present and structurally valid, not authenticated or a
-verified model. Failed checks and invalid configuration exit 1; missing providers are
-skipped and do not fail the run. No network client is imported for check-only mode.
+Billed live provider checks require explicit opt-in flags (`--enable llm`, `--enable embeddings`, `--enable datadog|loki|splunk`, `--enable github --github-repo owner/repo`, `--enable rag`) and write redacted reports only under git-ignored `tmp/`.
 
-Live calls require a separate explicit `--enable` for each provider. These commands
-can incur provider charges; use only models/endpoints you intend to test:
+---
 
-```powershell
-python scripts/live-acceptance.py --enable llm
-python scripts/live-acceptance.py --enable embeddings
-python scripts/live-acceptance.py --enable datadog --enable loki --enable splunk
-python scripts/live-acceptance.py --enable github --github-repo owner/repo
-python scripts/live-acceptance.py --enable rag
-```
+## Repository Layout
 
-LLM acceptance uses the native OpenAI-compatible or Anthropic client sequentially:
-one forced synthetic lookup tool turn and one final answer, at most 128 output tokens
-per request, no retries. Only a mocked marker question and fixtures are sent, never
-incident data. Unexpected tools/arguments, additional tools, incorrect final answers
-and missing/invalid reported usage fail the check. Embeddings use the native query
-helper for one short synthetic string and validate the returned vector. Vendor adapters
-perform one read-only query for a synthetic service/text, over 60 seconds with limit 1;
-empty results are valid connectivity acceptance. No vendor results are sent to models
-or reports. GitHub uses only GET `/user` and optional GET `/repos/owner/repo`, with
-no Git commands, branches, writes or PRs. TLS is verified, redirects and environment
-proxies are disabled, HTTP timeouts are 15 seconds and responses are size capped.
+- `investigator/` — FastAPI service (`api.py`), deterministic triage (`triage.py`), native LLM client (`llm.py`), bounded tools (`tools.py`), agent loop (`agent.py`), commit-pinned RAG retrieval (`retrieval.py`), guarded draft PR engine (`fixes.py`), log collectors & vendor adapters (`sources.py`, `vendors.py`, `webhooks.py`), PostgreSQL store (`store.py`)
+- `indexer/` — Build-time `tree-sitter` Java AST chunker + optional embeddings publishing atomically to `code_index.rag_*`
+- `services/order-service`, `services/inventory-service`, `services/payment-service` — Example Spring Boot microservices with isolated DB schemas and fault/admin endpoints
+- `services/demo-service` — Earlier single-image prototype (not deployed by `scripts/up.ps1`)
+- `chaos/` — Private ground-truth fault catalogs (`faults.yaml`, `inventory-faults.yaml`) and runners (`chaos_runner.py`, `infra_runner.py`)
+- `config/services.yaml` — Service registry (`repo_url`, `repo_path`, `pr_target_branch`, `prod_commit`, `db_schema`, `pod_selector`)
+- `deploy/k8s/` — Kubernetes manifests (`postgres`, `services`, `investigator`, `indexer-job`, `network-policy`, `chaos`, `infra-chaos-rbac`)
+- `scripts/` — Deployment (`up.ps1`), indexing (`index-code.ps1`), startup gate (`start-investigator.ps1`), fault trigger (`trigger.ps1`), commit switching (`use-pushed-commit.ps1`), IDE handoff (`incident-handoff.ps1`), DBeaver (`dbeaver-connect.ps1`), security & network probes (`security-check.ps1`, `probe-network.ps1`), provider acceptance (`live-acceptance.py`)
+- `api/postman/` — Generated Postman collections and environments for service and JPA fault endpoints
+- `docs/` — [architecture.html](docs/architecture.html), [rag.md](docs/rag.md), [draft-fixes.md](docs/draft-fixes.md), [network-isolation.md](docs/network-isolation.md), [infra-chaos.md](docs/infra-chaos.md), [plan-incident-investigator-monorepo.md](docs/plan-incident-investigator-monorepo.md)
 
-`--enable rag` independently authorizes four LLM requests: the same synthetic task
-and model with a full fixture corpus (off), then native lexical fixture retrieval (on).
-Both answers must pass, and only actual provider-reported input/output token counts
-are recorded. This verifies a synthetic retrieval comparison, not the deployed
-PostgreSQL/vector index, production investigations or answer quality in general.
-LLM inference cost and embedding cost are separate fields and remain `null` because
-there is no verified pricing source; the lexical RAG comparison makes zero embedding
-calls. No savings are fabricated or claimed. Enabling both `llm` and `rag` authorizes
-six LLM requests in total. Embedding acceptance needs its own `--enable embeddings`.
+---
 
-## Layout
+## Known Gaps & Next Phase
 
-- `services/order-service`, `services/inventory-service`, `services/payment-service` — independent Spring Boot applications and images, each with its own database schema and fault/admin endpoints
-- `services/demo-service` — earlier single-image prototype; it is not built or deployed by `scripts/up.ps1`
-- `investigator/` — collector (`sources.py`), store, triage (`triage.py`), LLM interface (`llm.py`), tools with enforced limits (`tools.py`), agent loop and report (`agent.py`), API (`api.py`)
-- `indexer/` — build-time source chunker with optional embeddings, writing to `code_index.chunks`
-- `chaos/` — `faults.yaml` catalog and the runner
-- `config/services.yaml` — service registry (repo, `prod_commit`, schema, pod selector); mounted as a ConfigMap
-- `deploy/k8s/` — manifests; `scripts/` — up, index, chaos, trigger, security gate
-- `docs/plan-incident-investigator-monorepo.md` — the plan this repo implements
-
-## Verified Status (2026-10-03)
-
-- Local deployment: three independent services across two nodes; successful order returned `CONFIRMED`; a bounded schema-drift scenario produced an analyzed data incident.
-- Database: schema-scoped application/indexer/investigator roles, restricted chaos role, and read-only diagnostic role. All seven roles are non-superuser; diagnostic SELECT succeeds while UPDATE is denied.
-- Manual indexing: 19 order, 23 inventory, and 20 payment AST chunks marked ready. Full original source preserves line references; retrieval supports pgvector similarity when configured and lexical fallback otherwise.
-- Investigator: bounded native provider tool conversations, trace-context log retention, evidence, status/error handling, webhook validation, vendor adapters, and reviewed draft-PR endpoint. Draft PRs never auto-merge; see [docs/draft-fixes.md](docs/draft-fixes.md). The registry targets `vigneshreddi/oncallbot` with `pr_target_branch: main`; after pushing, `scripts/use-pushed-commit.ps1` switches `prod_commit` from `local-demo` to the pushed SHA (git-ignored `config/services.deployed.yaml`). The model writes fixes through the validate-only `propose_patch` tool, and the investigator opens them as AI-labelled draft PRs (`FIX_PR_MODE=auto`, or `approve` to wait for `POST /incidents/{id}/open-pr`). If a draft PR is not good enough, `scripts/incident-handoff.ps1 -IncidentId <id>` (or `GET /incidents/{id}/handoff`) produces a Markdown brief of the saved investigation to continue in Copilot Chat.
-- Fault generators: Postman exports generated from catalog workflows and opt-in seeded chaos with cleanup. Generator ground truth is private and unavailable to the investigator.
-- Regression suite: 106 tests and 75 subtests passed; two disposable pgvector integration tests skipped without their test database. Static repository hygiene passed.
-- CI includes dependency, image, secret, and SBOM checks. A scanner failure or findings are not treated as approval.
-
-### Operational Blockers
-
-Gaps observed in the first full local run (incident 15, `null-legacy`, 2026-10-04), not yet fixed:
-
-- Investigator Role lacks `apps/deployments` and cluster-scoped `nodes` read; kind has no metrics-server, so usage is unavailable.
-- Rule-based mode collects no database evidence (for example the `inventory` row with null `reserved_qty`), so root cause stays unconfirmed.
-- The snapshot is stored three times in the report (top level, `services`, evidence step 2).
-- Readiness-probe failures from a recent rollout are not separated from incident evidence.
-- Demo sources contain `BUG:` comments that the RAG index returns verbatim.
-- `trace_id` is null in logs, so cross-service correlation is unavailable.
-
-- The current Docker Desktop cluster uses kindnet. Presence of NetworkPolicy objects does not prove enforcement. The full local security gate correctly fails until a policy-capable CNI and independent connectivity probes establish isolation. ClusterIP and loopback-only forwards remain required, but are not an absolute security guarantee.
-- Live OpenAI acceptance passed on 2026-10-05 (`gpt-5.4-mini` tool call, `text-embedding-3-small` at 1536 dimensions); the index for commit `66c74c7` uses OpenAI embeddings. Newer OpenAI models require `max_completion_tokens`. Datadog, Loki, Splunk and GitHub flows are still covered by mocks only. No measured live-model token savings are claimed.
-- Demo revisions are explicitly `synthetic-local-demo`. Real Git SHAs and a configured repository are required for verified commit provenance and draft PR creation.
-- Live vendor webhook access needs an authenticated private relay; public exposure is not enabled by this repository.
-- Inventory's two opt-in JPA workflows passed bounded local PostgreSQL acceptance and were disabled again. Additional fault categories, actual node-loss acceptance, and exhaustive scenario evaluation remain beyond the verified workflows.
+- **Policy-enforcing CNI:** Local Docker Desktop uses `kindnet`; target EKS/production requires Calico or Cilium with automated `-StrictIsolation` enforcement probes.
+- **Authenticated webhook ingress:** Place `/webhooks/*` behind an authenticated private relay or API gateway; do not expose publicly.
+- **Cluster & trace depth:** Add read-only `apps/deployments`, `nodes`, and `metrics-server` visibility, propagate `trace_id` end-to-end across service logs, and deduplicate snapshot storage inside reports.
+- **Documentation & runbook RAG (designed):** Implement the versioned documentation repository indexing pipeline alongside code RAG in `code_index` (contract documented in [docs/rag.md](docs/rag.md)).
+- **Multi-model eval scorecard & PR confidence gate (planned):** Turn the private fault catalog (`chaos/faults.yaml`) and NDJSON audit trails into repeatable multi-model benchmarks (triage accuracy, citation grounding, abstention, cost/incident) and add a sandboxed compile/test verification gate to rate PR confidence.
