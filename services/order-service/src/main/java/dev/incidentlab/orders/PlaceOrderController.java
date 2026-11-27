@@ -27,7 +27,15 @@ public class PlaceOrderController {
 
   public record PlaceOrder(String customerId, String sku, int qty) {}
 
-  public record Reservation(String sku, Integer reservedQty, Integer availableQty) {}
+  public record Reservation(String sku, Integer reservedQty, Integer availableQty) {
+    public int reservedQtyOrZero() {
+      return reservedQty == null ? 0 : reservedQty;
+    }
+
+    public int availableQtyOrZero() {
+      return availableQty == null ? 0 : availableQty;
+    }
+  }
 
   /** Incomplete contract: payment-service can return AUTHORIZED, which Jackson cannot map. */
   public enum PaymentStatus { CAPTURED, FAILED }
@@ -44,9 +52,14 @@ public class PlaceOrderController {
         .body(Map.of("sku", req.sku(), "qty", req.qty()))
         .retrieve().body(Reservation.class);
 
-    // BUG: reservedQty is Integer and is null for legacy stock rows. Unboxing throws NullPointerException.
-    int reserved = res.reservedQty();
-    int remaining = res.availableQty() - reserved;
+    if (res == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "inventory returned no reservation");
+    }
+    if (res.reservedQty() == null || res.availableQty() == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "inventory returned incomplete reservation: " + res);
+    }
+    int reserved = res.reservedQtyOrZero();
+    int remaining = res.availableQtyOrZero() - reserved;
 
     PaymentResult pay = chargeWithRetry(orderId, req.customerId());
     if (pay.status() != PaymentStatus.CAPTURED) {
