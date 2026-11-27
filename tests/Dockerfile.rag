@@ -1,0 +1,4 @@
+FROM incident-lab-indexer:rag-test
+COPY investigator/investigator/retrieval.py /app/retrieval.py
+COPY tests/test_rag_postgres.py /app/test_rag_postgres.py
+CMD ["python", "/app/test_rag_postgres.py"]

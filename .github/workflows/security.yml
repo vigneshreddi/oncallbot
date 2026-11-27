@@ -1,0 +1,191 @@
+name: Security
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Static gate and regression fixtures
+        shell: pwsh
+        run: |
+          ./scripts/security-check.ps1 -Static
+          ./tests/security/test-security.ps1
+          ./tests/security/test-ci.ps1
+      - name: Install checksum-verified pinned scanners
+        shell: pwsh
+        run: |
+          $directory = ./tests/security/install-tools.ps1
+          Add-Content $env:GITHUB_PATH $directory
+      - name: Scan Git history for secrets
+        run: gitleaks git . --redact --exit-code 1 --report-format json --report-path gitleaks-history.json
+      - name: Scan current files for secrets
+        if: always()
+        run: gitleaks dir . --redact --exit-code 1 --report-format json --report-path gitleaks-files.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: secrets-reports
+          path: gitleaks-*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  python-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [investigator, indexer, chaos]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.10'
+      - name: Install pinned auditor
+        run: python -m pip install pip-audit==2.9.0
+      - name: Audit resolved transitive dependencies
+        run: pip-audit -r '${{ matrix.component }}/requirements.txt' --strict --progress-spinner off --format json --output pip-audit.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: pip-audit-${{ matrix.component }}
+          path: pip-audit.json
+          if-no-files-found: error
+          retention-days: 14
+
+  maven-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [order-service, inventory-service, payment-service, demo-service]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21.0.7'
+      - name: Install checksum-verified Maven 3.9.9
+        shell: pwsh
+        run: |
+          $directory = ./tests/security/install-maven.ps1
+          Add-Content $env:GITHUB_PATH $directory
+      - name: Dependency-Check (CVSS >= 7 fails; feed errors fail)
+        run: >-
+          mvn -B -f 'services/${{ matrix.component }}/pom.xml'
+          org.owasp:dependency-check-maven:12.1.0:check
+          -DfailBuildOnCVSS=7 -DfailOnError=true -Dformats=HTML,JSON
+          -DoutputDirectory=${{ github.workspace }}/dependency-check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: dependency-check-${{ matrix.component }}
+          path: dependency-check/
+          if-no-files-found: error
+          retention-days: 14
+
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: order-service
+            context: services/order-service
+            dockerfile: services/order-service/Dockerfile
+          - name: inventory-service
+            context: services/inventory-service
+            dockerfile: services/inventory-service/Dockerfile
+          - name: payment-service
+            context: services/payment-service
+            dockerfile: services/payment-service/Dockerfile
+          - name: demo-service
+            context: services/demo-service
+            dockerfile: services/demo-service/Dockerfile
+          - name: investigator
+            context: investigator
+            dockerfile: investigator/Dockerfile
+          - name: chaos
+            context: chaos
+            dockerfile: chaos/Dockerfile
+          - name: indexer
+            context: .
+            dockerfile: indexer/Dockerfile
+          - name: postgres
+            image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install checksum-verified pinned scanners
+        shell: pwsh
+        run: |
+          $directory = ./tests/security/install-tools.ps1
+          Add-Content $env:GITHUB_PATH $directory
+      - name: Build or pull scanned image (no push)
+        env:
+          IMAGE: ${{ matrix.image }}
+          NAME: ${{ matrix.name }}
+          CONTEXT: ${{ matrix.context }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          if [ -n "$IMAGE" ]; then
+            docker pull "$IMAGE"
+            docker tag "$IMAGE" "security/$NAME:ci"
+          else
+            docker build --pull -f "$DOCKERFILE" -t "security/$NAME:ci" "$CONTEXT"
+          fi
+          docker image inspect "security/$NAME:ci" --format '{{json .}}' > image-metadata.json
+      - name: Generate CycloneDX SBOM (OS and application packages)
+        run: trivy image --image-src docker --format cyclonedx --output sbom.cdx.json 'security/${{ matrix.name }}:ci'
+      - name: Fail on HIGH or CRITICAL, including unfixed CVEs
+        run: trivy image --image-src docker --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output trivy.json 'security/${{ matrix.name }}:ci'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: image-security-${{ matrix.name }}
+          path: |
+            sbom.cdx.json
+            trivy.json
+            image-metadata.json
+          if-no-files-found: error
+          retention-days: 14
+
+  security-gate:
+    if: always()
+    needs: [static-and-secrets, python-audit, maven-audit, images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every scanner job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        shell: pwsh
+        run: |
+          $results = $env:RESULTS | ConvertFrom-Json
+          foreach ($job in $results.PSObject.Properties) {
+            if ($job.Value.result -ne 'success') { throw "Security job $($job.Name): $($job.Value.result)" }
+          }

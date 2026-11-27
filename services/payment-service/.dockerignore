@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!pom.xml
+!src/
+!src/**
+**/.env*
+**/secrets/**
+**/*.key
+**/*.pem
+**/*.token
+**/*credentials*
+**/application-local.*
+**/application-secret*

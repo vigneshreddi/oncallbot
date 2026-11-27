@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-fault-oom
+  namespace: incident-lab
+  labels: {incidentlab/infra-fault: "true"}
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: demo-fault-oom}}
+  template:
+    metadata:
+      labels: {app: demo-fault-oom, incidentlab/infra-fault: "true"}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector: {incidentlab/node-group: worker}
+      terminationGracePeriodSeconds: 5
+      securityContext: {runAsNonRoot: true, runAsUser: 10005, runAsGroup: 10005, seccompProfile: {type: RuntimeDefault}}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 8Mi}}
+      containers:
+        - name: memory-stress
+          image: python:3.12.12-alpine3.22
+          imagePullPolicy: IfNotPresent
+          command: [python, -B, -c]
+          args:
+            - |
+              import time
+              blocks = []
+              for index in range(12):
+                  blocks.append(bytearray(8 * 1024 * 1024))
+                  time.sleep(0.1)
+              time.sleep(120)
+          env: [{name: PYTHONDONTWRITEBYTECODE, value: "1"}]
+          resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi}}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-fault-node
+  namespace: incident-lab
+  labels: {incidentlab/infra-fault: "true"}
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: demo-fault-node}}
+  template:
+    metadata:
+      labels: {app: demo-fault-node, incidentlab/infra-fault: "true"}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchFields:
+                  - {key: metadata.name, operator: In, values: [incidentlab-simulated-nonexistent-node]}
+      securityContext: {runAsNonRoot: true, runAsUser: 10005, runAsGroup: 10005, seccompProfile: {type: RuntimeDefault}}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 8Mi}}
+      containers:
+        - name: simulated-unavailable
+          image: python:3.12.12-alpine3.22
+          imagePullPolicy: IfNotPresent
+          command: [python, -B, -c, "import time; time.sleep(120)"]
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 100m, memory: 32Mi}}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: demo-fault-pod
+  namespace: incident-lab
+  labels: {incidentlab/infra-fault: "true"}
+spec:
+  replicas: 0
+  serviceName: demo-fault-pod
+  selector: {matchLabels: {app: demo-fault-pod}}
+  template:
+    metadata:
+      labels: {app: demo-fault-pod, incidentlab/infra-fault: "true"}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector: {incidentlab/node-group: worker}
+      terminationGracePeriodSeconds: 5
+      securityContext: {runAsNonRoot: true, runAsUser: 10005, runAsGroup: 10005, seccompProfile: {type: RuntimeDefault}}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 8Mi}}
+      containers:
+        - name: disposable
+          image: python:3.12.12-alpine3.22
+          imagePullPolicy: IfNotPresent
+          command: [python, -B, -c, "import time; time.sleep(120)"]
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 100m, memory: 32Mi}}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]

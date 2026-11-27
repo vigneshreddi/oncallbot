@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+  - package-ecosystem: pip
+    directories: [/investigator, /indexer, /chaos]
+    schedule: {interval: weekly}
+  - package-ecosystem: maven
+    directories: [/services/order-service, /services/inventory-service, /services/payment-service, /services/demo-service]
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directories: [/investigator, /indexer, /chaos, /services/order-service, /services/inventory-service, /services/payment-service, /services/demo-service, /tests]
+    schedule: {interval: weekly}
